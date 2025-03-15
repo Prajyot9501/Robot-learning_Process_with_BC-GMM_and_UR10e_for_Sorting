@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import Trigger  # Import ROS2 service type
-from robot_learning_ws.src.gripper_control.gripper_control.robotiq_gripper_control import RobotiqGripper
+from robotiq_gripper_control import RobotiqGripper
 from rtde_control import RTDEControlInterface
 import time
 
@@ -10,7 +10,7 @@ class GripperNode(Node):
         super().__init__('gripper_node')
         
         # Initialize RTDE Control Interface
-        self.rtde_c = RTDEControlInterface("192.168.168.5")  
+        self.rtde_c = RTDEControlInterface("192.168.0.236")  
         self.get_logger().info("RTDE Control Interface connected!")
 
         # Initialize Robotiq Gripper

@@ -1,5 +1,5 @@
 import rtde_control
-from robot_learning_ws.src.gripper_control.gripper_control.robotiq_preamble import ROBOTIQ_PREAMBLE
+from robotiq_preamble import ROBOTIQ_PREAMBLE
 import time
 
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from rtde_receive import RTDEReceiveInterface  # RTDE for joint states
 
 # UR robot IP and port
-UR_IP = "192.168.0.236"
+UR_IP = "192.168.168.5"
 UR_PORT = 30002  # URScript command port
 
 # Define pick and place positions (in radians) for Yellow Color

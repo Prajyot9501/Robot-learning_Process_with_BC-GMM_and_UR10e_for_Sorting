@@ -1,7 +1,7 @@
 import socket
 
 # UR robot IP and port
-UR_IP = "192.168.0.236"
+UR_IP = "192.168.168.5"
 UR_PORT = 30002  # URScript command port
 
 # URScript command to move the robot (Modify the joint values as needed)

@@ -98,6 +98,6 @@ def json_to_hdf5(json_path, hdf5_path):
 
 
 if __name__ == "__main__":
-    json_file = "data/pick_and_place_log_2.json"
-    out_hdf5 = "data/pick_and_place_2.hdf5"
+    json_file = "data/pick_and_place_log_5.json"
+    out_hdf5 = "data/pick_and_place_5.hdf5"
     json_to_hdf5(json_file, out_hdf5)

@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./robosuite/robosuite/environments/manipulation"
+    ]
+}

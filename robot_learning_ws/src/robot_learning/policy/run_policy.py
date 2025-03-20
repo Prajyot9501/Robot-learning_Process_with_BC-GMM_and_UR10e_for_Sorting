@@ -10,7 +10,7 @@ import imageio
 import numpy as np
 import torch
 from copy import deepcopy
-
+import torch.nn.functional as F  # Import padding functions
 # Robomimic imports
 import robomimic
 import robomimic.utils.file_utils as FileUtils
@@ -23,6 +23,7 @@ from robomimic.config import config_factory
 import robosuite
 from robosuite.environments.base import REGISTERED_ENVS
 from robot_learning.color_sorting_env import ColorSortingEnv
+import matplotlib.pyplot as plt  # Import for plotting
 
 # --------------------------
 # Define paths
@@ -67,12 +68,14 @@ print(f"Using '{first_demo}' for obs_key_shapes: {obs_key_shapes}, action_dim: {
 # Register Environment
 # --------------------------
 REGISTERED_ENVS["ColorSortingEnv"] = ColorSortingEnv
+
 env_metadata = {
     "env_args": {
         "env_name": "ColorSortingEnv",
+        "env_version": "1.4.0",
+        "model_path": "robosuite/robosuite/models/assets/arenas/table_arena.xml",
         "type": 1,
         "env_kwargs": {
-            "robots": ["UR5e"],
             "has_renderer": True,
             "has_offscreen_renderer": True,
             "render_camera": "frontview",
@@ -80,8 +83,33 @@ env_metadata = {
             "use_object_obs": True,
             "use_camera_obs": False,
             "control_freq": 5,
+            "controller_configs": {
+                "type": "OSC_POSE",
+                "input_max": 1,
+                "input_min": -1,
+                "output_max": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5],
+                "output_min": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5],
+                "kp": 150,
+                "damping": 1,
+                "impedance_mode": "fixed",
+                "kp_limits": [0, 300],
+                "damping_limits": [0, 10],
+                "position_limits": None,
+                "orientation_limits": None,
+                "uncouple_pos_ori": True,
+                "control_delta": True,
+                "interpolation": None,
+                "ramp_ratio": 0.2
+            },
+            "robots": ["UR5e"],
+            "camera_names": ["frontview"],
+            "camera_heights": 500,
+            "camera_widths": 640,
+            "camera_depths": False,
+            "table_full_size": (0.94, 2.2, 0.05), 
+            "reward_shaping": False
         }
-    }
+    },
 }
 
 env = EnvUtils.create_env_from_metadata(env_metadata["env_args"], render=True, render_offscreen=True)
@@ -122,10 +150,12 @@ policy = BC(
     ac_dim=action_dim,
     device=device
 )
+# Store losses and metrics
+loss_history = []
+policy_grad_norms_history = []
 
 # Training Loop (Only Using First Demonstration)
 first_demo = list(dataset["data"].keys())[0]  # Select the first demo
-
 print(f"Training policy on the first demonstration: {first_demo}")
 
 # Extract observations and actions from the first demo
@@ -137,81 +167,129 @@ batch_size = config.train.batch_size
 
 for epoch in range(num_epochs):
     print(f"Epoch {epoch+1}/{num_epochs}")
+    epoch_loss = 0
+    epoch_policy_grad_norm = 0
+    num_batches = 0  # Count batches to average the loss per epoch
 
     for i in range(0, len(obs), batch_size):
         obs_batch = obs[i : i + batch_size]
         action_batch = actions[i : i + batch_size]
+        next_obs_batch = dataset[f"data/{first_demo}/next_obs/{first_obs_key}"][i : i + batch_size]
 
         # Convert to tensors
         obs_batch = torch.tensor(obs_batch, dtype=torch.float32, device=device)
         action_batch = torch.tensor(action_batch, dtype=torch.float32, device=device)
+        next_obs_batch = torch.tensor(next_obs_batch, dtype=torch.float32, device=device)
 
         # Ensure correct batch format
-        batch = {"obs": {first_obs_key: obs_batch}, "actions": action_batch}
+        batch = {
+            "obs": {first_obs_key: obs_batch},
+            "goal_obs": {first_obs_key: next_obs_batch},  # Use next_obs instead
+            "actions": action_batch
+        }
 
-        # Debug batch structure
-        print("Batch structure before training step:", batch.keys())
-        print(f"Observation keys: {batch['obs'].keys()}")
-        print(f"Observation shape: {batch['obs'][first_obs_key].shape}")
-        print(f"Action shape: {batch['actions'].shape}")
+        # Forward pass to get predictions
+        predictions = policy._forward_training(batch)
 
-        try:
-            loss_dict = policy._train_step(batch)
-            print(f"Loss dictionary: {loss_dict}")
-        except Exception as e:
-            print("Error during training step:", e)
-            raise  # Re-raise to see the exact issue
+        # Compute loss using predictions and batch
+        losses = policy._compute_losses(predictions, batch)
 
-        if not isinstance(loss_dict, dict):
-            raise ValueError(f"Expected loss_dict to be a dictionary, but got {type(loss_dict)} instead.")
+        # Perform gradient update
+        loss_dict = policy._train_step(losses)
 
-        # Debugging: Print available keys
-        print(f"Available loss_dict keys: {loss_dict.keys()}")
-
-        # Use the correct loss key
-        if "loss" in loss_dict:
-            loss = loss_dict["loss"]
-        elif "action_loss" in loss_dict:
-            loss = loss_dict["action_loss"]
+        # Store loss values
+        if "action_loss" in loss_dict:
+            loss_value = loss_dict["action_loss"].item()
+        elif "loss" in loss_dict:
+            loss_value = loss_dict["loss"].item()
         else:
-            # If neither "loss" nor "action_loss" is found, use the first available key
-            loss_keys = list(loss_dict.keys())
-            if loss_keys:
-                loss = loss_dict[loss_keys[0]]
-                print(f"Warning: 'loss' not found. Using '{loss_keys[0]}' instead.")
-            else:
-                raise KeyError("No valid loss key found in loss_dict.")
+            loss_value = 0  # Default to 0 if no valid loss key is found
 
-        print(f"Loss at Epoch {epoch+1}, Batch {i//batch_size + 1}: {loss}")
-        
+        epoch_loss += loss_value
+        epoch_policy_grad_norm += loss_dict["policy_grad_norms"]
+        num_batches += 1
 
-# Save trained policy
-policy.save(CHECKPOINT_PATH)
-print(f"Trained policy saved to {CHECKPOINT_PATH}")
+        print(f"Epoch {epoch+1}, Batch {i//batch_size + 1}: Loss={loss_value}, Grad Norm={loss_dict['policy_grad_norms']}")
 
+    # Average loss and gradient norm per epoch
+    loss_history.append(epoch_loss / num_batches)
+    policy_grad_norms_history.append(epoch_policy_grad_norm / num_batches)
 
 # --------------------------
-# Load Trained Policy
+# Plot Training Metrics
 # --------------------------
-policy, ckpt_dict = FileUtils.policy_from_checkpoint(ckpt_path=CHECKPOINT_PATH, device=device, verbose=True)
+
+plt.figure(figsize=(10, 5))
+plt.plot(loss_history, label="Action Loss", marker='o')
+plt.plot(policy_grad_norms_history, label="Policy Grad Norms", marker='s')
+plt.xlabel("Epochs")
+plt.ylabel("Loss / Gradient Norms")
+plt.title("Training Loss and Policy Gradient Norms")
+plt.legend()
+plt.grid()
+
+# Define save path
+loss_plot_path = os.path.join(OUTPUT_FOLDER, "training_loss_plot.png")
+
+# Save the figure
+plt.savefig(loss_plot_path, dpi=300)  # Save as high-quality PNG
+plt.close()  # Close the figure to prevent displaying
+
+print(f"Training loss plot saved to {loss_plot_path}")
+
+
 
 # --------------------------
 # Rollout Function to Evaluate Policy
 # --------------------------
+# --------------------------
+# Rollout Function to Evaluate Policy
+# --------------------------
+
 def rollout(policy, env, horizon=400, render=False, video_writer=None, video_skip=5, camera_names=None):
-    policy.start_episode()
-    obs = env.reset_to(env.get_state())
+    obs = env.reset()  # Reset environment
     total_reward = 0.
     success = False
 
     for step_i in range(horizon):
-        act = policy(ob=obs)
-        next_obs, r, done, _ = env.step(act)
+        # Extract observation keys
+        obs_keys = list(obs.keys())
+        #print(f"Available observation keys: {obs_keys}")  # Debugging
+
+        # Ensure the observation dictionary has the expected input format
+        obs_tensor = torch.tensor(obs["object"], dtype=torch.float32).unsqueeze(0)  # Shape: [1, 8]
+
+        # Expected input shape
+        expected_shape = 10  # Policy expects [1, 10]
+
+        # Pad if necessary
+        if obs_tensor.shape[-1] < expected_shape:
+            pad_size = expected_shape - obs_tensor.shape[-1]
+            obs_tensor = F.pad(obs_tensor, (0, pad_size), "constant", 0)  # Zero-pad
+            #print(f"Padded observation to shape: {obs_tensor.shape}")  # Debugging
+
+        # Create observation dictionary
+        obs_dict = {"object": obs_tensor}  # Now Shape: [1, 10]
+
+        # Get action from policy
+        with torch.no_grad():
+            policy_output = policy.nets["policy"](obs_dict)  # Run policy forward pass
+            
+            if isinstance(policy_output, dict):
+                action = policy_output["actions"]  # Get actions if output is a dict
+            else:
+                action = policy_output  # Assume it's already the action tensor
+            
+            #print(f"Raw action shape: {action.shape}")  # Debugging
+            action = action.cpu().numpy().squeeze()
+
+        # Step the environment
+        next_obs, r, done, _ = env.step(action)
         total_reward += r
         success = env.is_success()["task"]
 
         if render:
-            env.render(mode="human", camera_name=camera_names[0])
+            env.render(mode="rgb_array", height=912, width=1520, camera_name="frontview")
 
         if video_writer and step_i % video_skip == 0:
             frames = [
@@ -226,6 +304,8 @@ def rollout(policy, env, horizon=400, render=False, video_writer=None, video_ski
 
     return {"Return": total_reward, "Horizon": step_i + 1, "Success_Rate": float(success)}
 
+
+
 # --------------------------
 # Run Policy and Save Video
 # --------------------------
@@ -238,7 +318,7 @@ stats = rollout(
     render=False,
     video_writer=video_writer,
     video_skip=5,
-    camera_names=["agentview"]
+    camera_names=["frontview"]
 )
 
 video_writer.close()

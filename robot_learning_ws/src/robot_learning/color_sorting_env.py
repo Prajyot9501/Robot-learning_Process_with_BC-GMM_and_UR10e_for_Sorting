@@ -163,7 +163,7 @@ class ColorSortingEnv(ManipulationEnv):
             name="cube",
             size_min=[0.030, 0.030, 0.030],  # [0.015, 0.015, 0.015],
             size_max=[0.032, 0.032, 0.032],  # [0.018, 0.018, 0.018])
-            rgba=[0, 1, 0, 1],
+            rgba=[0, 0, 1, 1],
         )
 
         # Create placement initializer

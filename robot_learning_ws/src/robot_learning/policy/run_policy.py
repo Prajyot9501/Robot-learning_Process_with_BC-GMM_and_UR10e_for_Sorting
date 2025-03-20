@@ -120,15 +120,16 @@ env = EnvUtils.create_env_from_metadata(env_metadata["env_args"], render=True, r
 config = config_factory(algo_name="bc")  # Behavioral Cloning
 config.unlock()
 config.train.num_epochs = 100  # Training epochs
-config.train.batch_size = 32
+config.train.batch_size = 2
+config.train.learning_rate = 1e-4  # Experiment with a higher value
 
 # Handle different Robomimic versions
 if hasattr(config.algo, "policy"):
     config.algo.policy.hidden_dim = 256
-    config.algo.policy.rnn.enabled = False
+    config.algo.policy.rnn.enabled = True
 elif hasattr(config.algo, "network"):
     config.algo.network.hidden_dim = 256
-    config.algo.network.rnn.enabled = False
+    config.algo.network.rnn.enabled = True
 else:
     raise ValueError("Unable to find 'actor', 'policy', or 'network' in config.algo")
 
@@ -150,23 +151,34 @@ policy = BC(
     ac_dim=action_dim,
     device=device
 )
+
 # Store losses and metrics
 loss_history = []
 policy_grad_norms_history = []
 
-# Training Loop (Only Using First Demonstration)
-first_demo = list(dataset["data"].keys())[0]  # Select the first demo
-print(f"Training policy on the first demonstration: {first_demo}")
+# Select first demonstration
+first_demo = list(dataset["data"].keys())[0]
 
 # Extract observations and actions from the first demo
-obs = dataset[f"data/{first_demo}/obs/{first_obs_key}"][:]  # Extract first observation key
-actions = dataset[f"data/{first_demo}/actions"][:]  # Extract actions
+obs = dataset[f"data/{first_demo}/obs/{first_obs_key}"][:]  
+actions = dataset[f"data/{first_demo}/actions"][:]  
 
 num_epochs = config.train.num_epochs
 batch_size = config.train.batch_size
 
+# Check initial loss before training
+print("\nChecking Initial Loss Before Training...")
+initial_batch = {
+    "obs": {first_obs_key: torch.tensor(obs[:batch_size], dtype=torch.float32, device=device)},
+    "goal_obs": {first_obs_key: torch.tensor(dataset[f"data/{first_demo}/next_obs/{first_obs_key}"][:batch_size], dtype=torch.float32, device=device)},
+    "actions": torch.tensor(actions[:batch_size], dtype=torch.float32, device=device)
+}
+predictions = policy._forward_training(initial_batch)
+initial_losses = policy._compute_losses(predictions, initial_batch)
+print(f"Initial Loss: {initial_losses}")
+
 for epoch in range(num_epochs):
-    print(f"Epoch {epoch+1}/{num_epochs}")
+    print(f"\nEpoch {epoch+1}/{num_epochs}")
     epoch_loss = 0
     epoch_policy_grad_norm = 0
     num_batches = 0  # Count batches to average the loss per epoch
@@ -194,26 +206,36 @@ for epoch in range(num_epochs):
         # Compute loss using predictions and batch
         losses = policy._compute_losses(predictions, batch)
 
+        # Ensure action loss exists
+        if "action_loss" in losses:
+            loss_value = losses["action_loss"].item()
+        elif "loss" in losses:
+            loss_value = losses["loss"].item()
+        else:
+            loss_value = 0  # Default to 0 if no valid loss key is found
+
         # Perform gradient update
         loss_dict = policy._train_step(losses)
 
         # Store loss values
-        if "action_loss" in loss_dict:
-            loss_value = loss_dict["action_loss"].item()
-        elif "loss" in loss_dict:
-            loss_value = loss_dict["loss"].item()
-        else:
-            loss_value = 0  # Default to 0 if no valid loss key is found
-
         epoch_loss += loss_value
         epoch_policy_grad_norm += loss_dict["policy_grad_norms"]
         num_batches += 1
 
-        print(f"Epoch {epoch+1}, Batch {i//batch_size + 1}: Loss={loss_value}, Grad Norm={loss_dict['policy_grad_norms']}")
+        print(f"Batch {i//batch_size + 1}: Loss={loss_value}, Grad Norm={loss_dict['policy_grad_norms']}")
+
+        # Debug: Check if gradients are updating
+        for name, param in policy.nets["policy"].named_parameters():
+            if param.grad is not None:
+                print(f"Gradient Norm for {name}: {param.grad.norm().item()}")
 
     # Average loss and gradient norm per epoch
-    loss_history.append(epoch_loss / num_batches)
-    policy_grad_norms_history.append(epoch_policy_grad_norm / num_batches)
+    loss_history.append(epoch_loss / max(1, num_batches))
+    policy_grad_norms_history.append(epoch_policy_grad_norm / max(1, num_batches))
+
+    print(f"Epoch {epoch+1} Completed: Avg Loss={loss_history[-1]}, Avg Grad Norm={policy_grad_norms_history[-1]}")
+
+
 
 # --------------------------
 # Plot Training Metrics
@@ -236,8 +258,6 @@ plt.savefig(loss_plot_path, dpi=300)  # Save as high-quality PNG
 plt.close()  # Close the figure to prevent displaying
 
 print(f"Training loss plot saved to {loss_plot_path}")
-
-
 
 # --------------------------
 # Rollout Function to Evaluate Policy

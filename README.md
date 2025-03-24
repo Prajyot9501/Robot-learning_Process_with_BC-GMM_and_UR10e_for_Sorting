@@ -4,7 +4,7 @@ This repository contains code and resources related to robot learning for sortin
 
 **Video Demonstration:**  
 [Watch UR10e Sorting Task Demo](./robot_learning_ws/src/robot_learning/data/videos/real_recording_1.mp4)
-[Watch UR10 Robosuite picking blocks](./robot_learning_ws/src/robot_learning/data/videos/playback_sim1.mp4)
+[Watch UR10 Robosuite picking blocks](./robot_learning_ws/src/robot_learning/data/videos/playback_sim2_yellow.mp4)
 
 *Click the link above to view a demonstration video showcasing the sorting task performed by the UR10e robot.*
 

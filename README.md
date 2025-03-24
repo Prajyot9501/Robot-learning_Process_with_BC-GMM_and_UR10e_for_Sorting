@@ -3,7 +3,7 @@
 This repository contains code and resources related to robot learning for sorting problems on a real UR10e robot, focusing on training RL models for robotic tasks using RoboMimic and RoboSuite environments.
 
 **Video Demonstration:**  
-[Watch UR10e Sorting Task Demo](./videos/real_recording_1.mp4)
+[Watch UR10e Sorting Task Demo](./robot_learning_ws/src/robot_learning/data/videos/real_recording_1.mp4)
 
 *Click the link above to view a demonstration video showcasing the sorting task performed by the UR10e robot.*
 

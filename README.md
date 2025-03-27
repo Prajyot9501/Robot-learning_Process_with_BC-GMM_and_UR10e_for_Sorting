@@ -1,4 +1,5 @@
-# Robot-learning-524
+# Robot-learning-524 Final Project : Robot Learning Process using BC-GMM and UR10e for Sorting Problems <br>***by Hambal Tella and Prajyot Patil***
+
 
 This repository contains code and resources related to robot learning for sorting problems on a real UR10e robot, focusing on training RL models for robotic tasks using RoboMimic and RoboSuite environments.
 
@@ -59,4 +60,7 @@ pip install numpy scipy torch torchvision robosuite robomimic open3d scikit-lear
 ```bash
 cd robot_learning_ws/src/robot_learning
 python3 pick_and_place.py
-
+```
+## Collaborators
+- Hambal Tella
+- Prajyot Patil
